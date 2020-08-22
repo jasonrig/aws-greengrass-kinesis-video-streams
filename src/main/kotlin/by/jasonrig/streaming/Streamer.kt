@@ -8,6 +8,8 @@ import org.freedesktop.gstreamer.lowlevel.MainLoop
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
 import java.io.File
 import java.time.format.DateTimeFormatter
+import java.util.*
+import kotlin.collections.ArrayList
 
 
 /**
@@ -58,14 +60,26 @@ class Streamer(
     // Gstreamer pipe
     private val pipe: Pipeline
 
+    // Timer that tracks credentials expiration
+    private val credentialsTimer = Timer()
+
     init {
         // Prepare the gstreamer credential configuration
         val credentials = credentialsProvider.resolveCredentials()
         val credentialsParameters = try {
+
             // If we have a `GreengrassCredentials` object, create a credentials file that gstreamer can consume
+            // and set up a trigger for the expiration time
             val ggCredentials = credentials as GreengrassCredentials
-            val formatter = DateTimeFormatter.ISO_INSTANT
-            val expiration = formatter.format(ggCredentials.expiry)
+
+            // Trigger the credentials expiration callback at the expiration time
+            credentialsTimer.schedule(object : TimerTask() {
+                override fun run() {
+                    callback?.onCredentialsExpiration()
+                }
+            }, Date.from(ggCredentials.expiry.minusSeconds(30)))
+
+            val expiration = DateTimeFormatter.ISO_INSTANT.format(ggCredentials.expiry)
             val credentialsFile = File.createTempFile("aws_credentials", "")
             credentialsFile.writeText("CREDENTIALS ${ggCredentials.accessKeyId()} $expiration ${ggCredentials.secretAccessKey()} ${ggCredentials.sessionToken()}")
             "credential-path=\"${credentialsFile.absolutePath}\""
@@ -125,14 +139,6 @@ class Streamer(
         pipe.stop()
         loop.quit()
         worker?.join()
-    }
-
-    /**
-     * Indicates whether the stream is running or not
-     * @return true if the stream is running, false otherwise
-     */
-    fun isRunning(): Boolean {
-        return loop.isRunning
     }
 
     /**

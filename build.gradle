@@ -12,6 +12,8 @@ repositories {
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
 
+    implementation "org.slf4j:slf4j-simple:1.6.1"
+
     implementation "org.freedesktop.gstreamer:gst1-java-core:1.1.0"
 
     implementation "commons-cli:commons-cli:1.4"

@@ -5,7 +5,11 @@ import com.amazonaws.greengrass.javasdk.model.PublishRequest
 import com.amazonaws.greengrass.javasdk.model.QueueFullPolicy
 import com.amazonaws.services.lambda.runtime.Context
 import com.amazonaws.services.lambda.runtime.RequestHandler
+import com.google.gson.GsonBuilder
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
+
 
 /**
  * Extends the RequestHandler and provdes a "handleIoTRequest", which publishes the result
@@ -19,18 +23,23 @@ abstract class IoTRequest(
 ) : RequestHandler<Map<String, String>, String> {
 
     companion object {
+        private val iotThingName = System.getenv("AWS_IOT_THING_NAME")
         private val iotDataClient = IotDataClient()
+        private val gson = GsonBuilder().create()
+        private val logger: Logger = LoggerFactory.getLogger(IoTRequest::class.java)
     }
 
     /**
      * Publishes a message to MQTT
      */
     protected fun publishMessage(message: Response) {
+        val messagePayload = message.toString()
         val messageRequest = PublishRequest()
             .withTopic(mqttTopic)
-            .withPayload(ByteBuffer.wrap(message.toString().toByteArray(Charsets.UTF_8)))
+            .withPayload(ByteBuffer.wrap(messagePayload.toByteArray(Charsets.UTF_8)))
             .withQueueFullPolicy(queuePolicy)
         iotDataClient.publish(messageRequest)
+        logger.info("Published message: $messagePayload")
     }
 
     /**

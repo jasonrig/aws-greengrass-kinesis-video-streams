@@ -30,4 +30,10 @@ interface StreamLifecycleEvents {
      * @param message warning message
      */
     fun onWarn(source: GstObject, code: Int, message: String)
+
+    /**
+     * Called we the credentials used for the stream are due to expire
+     */
+    fun onCredentialsExpiration()
+
 }

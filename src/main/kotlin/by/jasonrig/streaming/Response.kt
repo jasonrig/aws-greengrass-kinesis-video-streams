@@ -8,8 +8,8 @@ import com.google.gson.GsonBuilder
  * @param status a flag to indicate the severity of the message
  * @param code an optional status code
  */
-class Response(message: String, status: Status, code: Int? = null) {
-    private val message = HashMap<String, String>()
+class Response(message: String, status: Status, code: Int? = null, extra: Map<String, Any>? = null) {
+    private val message = HashMap<String, Any>()
 
     companion object {
         private val gson = GsonBuilder().setPrettyPrinting().create()
@@ -18,8 +18,11 @@ class Response(message: String, status: Status, code: Int? = null) {
     init {
         this.message["message"] = message
         this.message["status"] = status.text
-        if (code != null) {
-            this.message["code"] = "$code"
+        code?.also {
+            this.message["code"] = it
+        }
+        extra?.also {
+            this.message["extra"] = extra
         }
     }
 

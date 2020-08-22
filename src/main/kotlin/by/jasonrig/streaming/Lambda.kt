@@ -2,18 +2,22 @@ package by.jasonrig.streaming
 
 import com.amazonaws.services.lambda.runtime.Context
 import org.freedesktop.gstreamer.GstObject
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
+
+typealias StreamParameters = Map<String, String>
 
 /**
  * Implements the AWS Lambda function that controls the stream
  */
 class Lambda : IoTRequest(), StreamLifecycleEvents {
 
-    var currentStreamParameters: Map<String, String>? = null
-
     companion object {
-        // The current stream object
-        var currentStreamer: Streamer? = null
+        private val logger: Logger = LoggerFactory.getLogger(Lambda::class.java)
+
+        // The current stream object and parameters
+        var currentStreamer: Pair<Streamer, StreamParameters>? = null
 
         // The AWS credentials provider used to authenticate the stream
         val credentialsProvider: AwsCredentialsProvider = GreengrassCredentialsProvider()
@@ -22,6 +26,7 @@ class Lambda : IoTRequest(), StreamLifecycleEvents {
         const val TASK_KEY = "task"
         const val START_TASK = "start"
         const val STOP_TASK = "stop"
+        const val STATUS_TASK = "status"
         const val VIDEO_DEVICE_KEY = "videoDevice"
         const val STREAM_NAME_KEY = "streamName"
         const val AWS_REGION = "awsRegion"
@@ -41,8 +46,20 @@ class Lambda : IoTRequest(), StreamLifecycleEvents {
         return when (input[TASK_KEY]) {
             START_TASK -> startTask(input)
             STOP_TASK -> stopTask()
-            else -> Response("No task specified", Response.Status.ERROR)
+            STATUS_TASK -> statusTask()
+            else -> Response("Invalid task or task not specified", Response.Status.ERROR)
         }
+    }
+
+    /**
+     * Reports the current stream status and configuration
+     * @return the result of the status request
+     */
+    private fun statusTask(): Response {
+        if (currentStreamer == null) {
+            return Response("No stream running", Response.Status.NOTICE)
+        }
+        return Response("Stream active", Response.Status.NOTICE, extra = currentStreamer?.second)
     }
 
     /**
@@ -78,10 +95,7 @@ class Lambda : IoTRequest(), StreamLifecycleEvents {
         newStreamer.start()
 
         // Keep references to the current configuration and streamer object
-        // `currentStreamParameters` is kept in case the stream needs to be restarted due to an error
-        // `currentStreamer` is kept so we can stop the stream later
-        currentStreamParameters = input
-        currentStreamer = newStreamer
+        currentStreamer = Pair(newStreamer, input)
 
         // Return the result of the request (SUCCESS if we get this far)
         return Response("Stream started", Response.Status.SUCCESS)
@@ -91,7 +105,7 @@ class Lambda : IoTRequest(), StreamLifecycleEvents {
      * Stops any running stream
      */
     private fun stopTask(): Response {
-        currentStreamer?.stop()
+        currentStreamer?.first?.stop()
         currentStreamer = null
         return Response("Streaming is stopped", Response.Status.SUCCESS)
     }
@@ -104,7 +118,7 @@ class Lambda : IoTRequest(), StreamLifecycleEvents {
      */
     override fun onEnd(source: GstObject) {
         val msg = "[${source.name}] gstreamer stopped"
-        println(msg)
+        logger.info(msg)
         publishMessage(Response(msg, Response.Status.SUCCESS))
     }
 
@@ -118,12 +132,11 @@ class Lambda : IoTRequest(), StreamLifecycleEvents {
      */
     override fun onError(source: GstObject, code: Int, message: String) {
         val msg = "[${source.name}] $message"
-        println("ERROR | $msg")
+        logger.error(msg)
         publishMessage(Response(msg, Response.Status.ERROR, code))
-
-        if (source.name == "kvssink0" && code == 1 && currentStreamParameters != null) {
+        currentStreamer?.also {
             publishMessage(Response("Restarting stream", Response.Status.NOTICE))
-            startTask(currentStreamParameters!!)
+            startTask(it.second)
         }
     }
 
@@ -137,8 +150,21 @@ class Lambda : IoTRequest(), StreamLifecycleEvents {
      */
     override fun onWarn(source: GstObject, code: Int, message: String) {
         val msg = "[${source.name}] $message"
-        println("WARNING | $msg")
+        logger.warn(msg)
         publishMessage(Response(msg, Response.Status.WARNING, code))
+    }
+
+    /**
+     * Lifecycle event - executed when the credentials used to authenticate with the AWS Kinesis Video Streams endpoint
+     * expire
+     * @see StreamLifecycleEvents.onCredentialsExpiration
+     */
+    override fun onCredentialsExpiration() {
+        currentStreamer?.also {
+            logger.info("Stream is restarting, credentials have expired")
+            publishMessage(Response("Restarting stream", Response.Status.NOTICE))
+            startTask(it.second)
+        }
     }
 
 }
